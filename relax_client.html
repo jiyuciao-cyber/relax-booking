@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>跟著大米一起放鬆 | 前台預約</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Noto Sans TC',sans-serif;background-color:#faf9f6;color:#292524}</style>
+</head>
+<body class="min-h-screen pb-12">
+<header class="bg-white/80 backdrop-blur-md border-b border-stone-100 sticky top-0 z-50 shadow-sm">
+  <div class="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
+    <div class="flex flex-col sm:flex-row sm:items-baseline sm:space-x-2">
+      <span class="text-lg font-bold tracking-wider text-stone-800">跟著大米一起放鬆</span>
+      <span class="text-xs text-emerald-700 font-medium font-mono">(relax_with_dami)</span>
+    </div>
+    <a href="relax_admin.html" class="px-3.5 py-1.5 rounded-full text-xs font-medium bg-stone-100 text-stone-600 hover:bg-stone-200 transition-all">後台管理</a>
+  </div>
+</header>
+
+<main class="max-w-4xl mx-auto px-4 mt-8">
+  <section class="space-y-8">
+    <div class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm bg-gradient-to-br from-white to-emerald-50/20">
+      <h1 class="text-2xl font-bold text-stone-800 mb-2">預約您的療癒時光</h1>
+      <p class="text-sm text-stone-500">請選擇日期與時段。每個時段上限 6 位；休假日不開放預約。</p>
+    </div>
+
+    <div id="status-message" class="hidden p-3 rounded-xl text-sm border"></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <section class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm">
+        <div class="flex items-center justify-between mb-4 gap-3">
+          <h2 class="text-base font-bold flex items-center text-stone-700"><span class="w-5 h-5 rounded-full bg-emerald-700 text-white text-xs flex items-center justify-center mr-2">1</span>點選預約日期</h2>
+          <div class="flex items-center gap-2">
+            <button id="prev-month-btn" type="button" class="w-8 h-8 rounded-full bg-stone-50 hover:bg-stone-100 text-stone-500 disabled:opacity-40 disabled:cursor-not-allowed">&lsaquo;</button>
+            <div id="current-month-year" class="text-sm font-semibold text-stone-600 min-w-[92px] text-center"></div>
+            <button id="next-month-btn" type="button" class="w-8 h-8 rounded-full bg-stone-50 hover:bg-stone-100 text-stone-500">&rsaquo;</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-stone-400 mb-2"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
+        <div id="calendar-grid" class="grid grid-cols-7 gap-1 text-center"></div>
+      </section>
+
+      <section class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm flex flex-col">
+        <h2 class="text-base font-bold flex items-center text-stone-700 mb-4"><span class="w-5 h-5 rounded-full bg-emerald-700 text-white text-xs flex items-center justify-center mr-2">2</span>選擇專屬時段</h2>
+        <div id="selected-date-display" class="text-xs font-medium text-emerald-800 mb-4 bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100/40 hidden"></div>
+        <div id="slots-container" class="grid grid-cols-1 gap-2 overflow-y-auto max-h-[320px] pr-1"><p class="text-sm text-stone-400 text-center py-12">資料載入中...</p></div>
+      </section>
+    </div>
+
+    <section id="form-container" class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm max-w-xl mx-auto hidden">
+      <h2 class="text-base font-bold flex items-center text-stone-700 mb-6"><span class="w-5 h-5 rounded-full bg-emerald-700 text-white text-xs flex items-center justify-center mr-2">3</span>填寫預約資料</h2>
+      <div id="summary-badge" class="mb-6 p-3 bg-stone-50 border border-stone-100 rounded-xl text-sm text-stone-700 font-medium"></div>
+      <form id="booking-form" class="space-y-4" novalidate>
+        <div><label for="cust-name" class="block text-sm font-medium text-stone-700 mb-1">姓名 *</label><input id="cust-name" required maxlength="30" autocomplete="name" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm"></div>
+        <div><label for="cust-phone" class="block text-sm font-medium text-stone-700 mb-1">電話號碼 *</label><input id="cust-phone" required inputmode="tel" pattern="^0[0-9]{8,9}$" autocomplete="tel" placeholder="0912345678" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm"></div>
+        <div><label for="cust-line" class="block text-sm font-medium text-stone-700 mb-1">LINE ID *</label><input id="cust-line" required maxlength="50" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm"><span class="text-xs text-stone-400 mt-1.5 block">※ 請確認已開啟「允許利用 ID 加入好友」。</span></div>
+        <button id="submit-btn" class="w-full mt-2 bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-3 rounded-xl shadow-md text-sm tracking-wider">確認安排預約</button>
+      </form>
+    </section>
+  </section>
+</main>
+
+<div id="success-modal" class="fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden opacity-0 transition-opacity duration-300"><div class="bg-white p-8 rounded-2xl max-w-sm w-full mx-4 text-center shadow-xl border border-stone-100 transform scale-95 transition-transform duration-300"><h3 class="text-lg font-bold text-stone-800 mb-2">預約成功囉！</h3><p class="text-sm text-stone-500 mb-6">專屬的放鬆時光已為您保留，大米會透過 LINE ID 盡快與您聯繫。</p><button id="close-modal-btn" type="button" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-2.5 rounded-xl text-sm shadow-md">好的，很期待</button></div></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const SUPABASE_URL = 'https://nhynoxugvkkbovtnemww.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_hitSQ5O5nLVyk5_qN1GsXA_aJBEWaXH';
+  const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const CONFIG = {
+    maxCapacity: 6,
+    openHour: 9,
+    closeHour: 21,
+    monthNames: ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月']
+  };
+  const cls = {
+    dayBase: 'h-10 text-sm font-medium rounded-xl flex items-center justify-center transition-all focus:outline-none',
+    dayDisabled: 'text-stone-300 cursor-not-allowed bg-stone-50/50',
+    dayFull: 'text-red-400 bg-red-50/40 line-through cursor-not-allowed',
+    dayHoliday: 'text-amber-600 bg-amber-50 line-through cursor-not-allowed',
+    daySelected: 'bg-emerald-700 text-white shadow-md font-semibold scale-105',
+    dayAvailable: 'text-stone-700 hover:bg-emerald-50 hover:text-emerald-800',
+    slotBase: 'w-full p-3.5 border text-left rounded-xl transition-all flex items-center justify-between text-sm font-medium focus:outline-none',
+    slotDisabled: 'border-stone-100 bg-stone-50 text-stone-400 cursor-not-allowed',
+    slotSelected: 'border-emerald-700 bg-emerald-700 text-white shadow-md scale-[1.01]',
+    slotAvailable: 'border-stone-200 text-stone-700 hover:border-emerald-600 hover:bg-emerald-50/30'
+  };
+
+  const $ = selector => document.querySelector(selector);
+  const el = (tag, className = '', text = '') => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    return node;
+  };
+  const state = {
+    today: startOfDay(new Date()),
+    year: new Date().getFullYear(),
+    month: new Date().getMonth(),
+    selectedDate: '',
+    selectedSlot: '',
+    bookings: [],
+    holidays: []
+  };
+  const dom = {
+    grid: $('#calendar-grid'),
+    monthText: $('#current-month-year'),
+    prev: $('#prev-month-btn'),
+    next: $('#next-month-btn'),
+    status: $('#status-message'),
+    dateBadge: $('#selected-date-display'),
+    slots: $('#slots-container'),
+    formBox: $('#form-container'),
+    form: $('#booking-form'),
+    summary: $('#summary-badge'),
+    name: $('#cust-name'),
+    phone: $('#cust-phone'),
+    line: $('#cust-line'),
+    submit: $('#submit-btn'),
+    modal: $('#success-modal'),
+    close: $('#close-modal-btn')
+  };
+
+  dom.prev.addEventListener('click', () => changeMonth(-1));
+  dom.next.addEventListener('click', () => changeMonth(1));
+  dom.form.addEventListener('submit', submitBooking);
+  dom.close.addEventListener('click', closeModal);
+  dom.modal.addEventListener('click', event => {
+    if (event.target === dom.modal) closeModal();
+  });
+
+  loadData();
+
+  async function loadData() {
+    showStatus('資料載入中...', 'info');
+
+    const [{ data: bookingRows, error: bookingError }, { data: holidayRows, error: holidayError }] = await Promise.all([
+      loadPublicBookedSlots(),
+      db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true })
+    ]);
+
+    if (bookingError || holidayError) {
+      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message}`, 'error');
+      emptySlots('資料讀取失敗，請重新整理頁面');
+      renderCalendar();
+      return;
+    }
+
+    state.bookings = (bookingRows || []).map(row => ({
+      date: row.booking_date,
+      slot: row.slot
+    }));
+    state.holidays = (holidayRows || []).map(row => ({
+      id: row.id,
+      date: row.holiday_date,
+      reason: row.reason || ''
+    }));
+
+    hideStatus();
+    renderCalendar();
+    if (state.selectedDate) renderTimeSlots(state.selectedDate);
+    else emptySlots('請先選擇日期');
+  }
+
+  async function loadPublicBookedSlots() {
+    const result = await db
+      .from('public_booked_slots')
+      .select('booking_date, slot');
+
+    if (!result.error) return result;
+
+    return db
+      .from('bookings')
+      .select('booking_date, slot');
+  }
+
+  function changeMonth(offset) {
+    const date = new Date(state.year, state.month + offset, 1);
+    state.year = date.getFullYear();
+    state.month = date.getMonth();
+    state.selectedDate = '';
+    state.selectedSlot = '';
+    dom.formBox.classList.add('hidden');
+    dom.dateBadge.classList.add('hidden');
+    emptySlots('請先選擇日期');
+    renderCalendar();
+  }
+
+  function renderCalendar() {
+    dom.grid.replaceChildren();
+    dom.monthText.textContent = `${state.year}年 ${CONFIG.monthNames[state.month]}`;
+
+    const frag = document.createDocumentFragment();
+    const first = new Date(state.year, state.month, 1).getDay();
+    const total = new Date(state.year, state.month + 1, 0).getDate();
+    for (let i = 0; i < first; i += 1) frag.appendChild(el('div'));
+    for (let day = 1; day <= total; day += 1) frag.appendChild(dayButton(day));
+    dom.grid.appendChild(frag);
+    dom.prev.disabled = new Date(state.year, state.month, 1) <= new Date(state.today.getFullYear(), state.today.getMonth(), 1);
+  }
+
+  function dayButton(day) {
+    const btn = el('button', cls.dayBase, String(day));
+    btn.type = 'button';
+    const date = new Date(state.year, state.month, day);
+    const dateStr = formatDate(date);
+    const holiday = getHoliday(dateStr);
+    btn.setAttribute('aria-label', `選擇 ${dateStr}`);
+
+    if (startOfDay(date) < state.today) {
+      disable(btn, cls.dayDisabled);
+    } else if (holiday) {
+      disable(btn, cls.dayHoliday);
+      btn.title = `休假日：${holiday.reason || '不開放預約'}`;
+    } else if (isDayFullyBooked(dateStr)) {
+      disable(btn, cls.dayFull);
+      btn.title = '當日所有時段已額滿';
+    } else {
+      btn.className += ` ${dateStr === state.selectedDate ? cls.daySelected : cls.dayAvailable}`;
+      btn.addEventListener('click', () => selectDate(dateStr));
+    }
+
+    return btn;
+  }
+
+  function disable(btn, className) {
+    btn.className += ` ${className}`;
+    btn.disabled = true;
+  }
+
+  function selectDate(dateStr) {
+    state.selectedDate = dateStr;
+    state.selectedSlot = '';
+    dom.formBox.classList.add('hidden');
+    dom.dateBadge.textContent = `已選取預約日期：${dateStr}`;
+    dom.dateBadge.classList.remove('hidden');
+    renderCalendar();
+    renderTimeSlots(dateStr);
+  }
+
+  function renderTimeSlots(dateStr) {
+    dom.slots.replaceChildren();
+    if (getHoliday(dateStr)) {
+      emptySlots('這天是休假日，不開放預約');
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    for (let hour = CONFIG.openHour; hour <= CONFIG.closeHour; hour += 1) {
+      frag.appendChild(slotButton(dateStr, hour));
+    }
+    dom.slots.appendChild(frag);
+  }
+
+  function emptySlots(text) {
+    dom.slots.replaceChildren(el('p', 'text-sm text-stone-400 text-center py-12', text));
+  }
+
+  function slotButton(dateStr, hour) {
+    const slot = `${String(hour).padStart(2, '0')}:00`;
+    const next = `${String(hour + 1).padStart(2, '0')}:00`;
+    const remain = CONFIG.maxCapacity - getBookedCount(dateStr, slot);
+    const btn = el('button', cls.slotBase);
+    const badge = el('span');
+    btn.type = 'button';
+    btn.append(el('span', '', `${slot} - ${next}`), badge);
+
+    if (remain <= 0) {
+      disable(btn, cls.slotDisabled);
+      badge.className = 'px-2 py-0.5 rounded-md text-xs bg-stone-200 text-stone-500 font-normal';
+      badge.textContent = '已滿名額';
+      return btn;
+    }
+
+    if (slot === state.selectedSlot) {
+      btn.className += ` ${cls.slotSelected}`;
+      badge.className = 'px-2 py-0.5 rounded-md text-xs bg-white/20 text-white font-normal';
+      badge.textContent = '已選定';
+    } else {
+      btn.className += ` ${cls.slotAvailable}`;
+      badge.className = remain <= 2 ? 'px-2 py-0.5 rounded-md text-xs bg-amber-50 text-amber-700 font-normal' : 'px-2 py-0.5 rounded-md text-xs bg-stone-100 text-stone-500 font-normal';
+      badge.textContent = remain <= 2 ? `倒數名額（餘 ${remain} 位）` : `有空檔（餘 ${remain} 位）`;
+    }
+
+    btn.addEventListener('click', () => selectSlot(slot, next, remain));
+    return btn;
+  }
+
+  function selectSlot(slot, next, remain) {
+    if (remain <= 0) return;
+    state.selectedSlot = slot;
+    renderTimeSlots(state.selectedDate);
+    dom.summary.textContent = `預約療癒時間：${state.selectedDate} 的 ${slot} - ${next}`;
+    dom.formBox.classList.remove('hidden');
+    setTimeout(() => dom.formBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100);
+  }
+
+  async function submitBooking(event) {
+    event.preventDefault();
+    const data = {
+      name: dom.name.value.trim(),
+      phone: dom.phone.value.replace(/\s|-/g, ''),
+      lineId: dom.line.value.trim()
+    };
+
+    if (!state.selectedDate || !state.selectedSlot) return alert('請重新選擇日期與時段。');
+    if (getHoliday(state.selectedDate)) return alert('此日期為休假日，請改選其他日期。');
+    if (!data.name || !data.phone || !data.lineId) return alert('請完整填寫姓名、電話號碼與 LINE ID。');
+    if (!/^0[0-9]{8,9}$/.test(data.phone)) {
+      dom.phone.focus();
+      return alert('請輸入正確的台灣電話號碼。');
+    }
+
+    await loadData();
+    if (getBookedCount(state.selectedDate, state.selectedSlot) >= CONFIG.maxCapacity) {
+      dom.formBox.classList.add('hidden');
+      renderTimeSlots(state.selectedDate);
+      return alert('此時段已額滿，請改選其他時段。');
+    }
+
+    setSubmitting(true);
+    const { data: insertedRows, error } = await db
+      .from('bookings')
+      .insert({
+        booking_date: state.selectedDate,
+        slot: state.selectedSlot,
+        name: data.name,
+        phone: data.phone,
+        line_id: data.lineId
+      });
+    setSubmitting(false);
+
+    if (error) {
+      alert('預約失敗：' + error.message);
+      return;
+    }
+
+    state.bookings.push({
+      date: state.selectedDate,
+      slot: state.selectedSlot
+    });
+
+    dom.form.reset();
+    dom.formBox.classList.add('hidden');
+    state.selectedSlot = '';
+    renderCalendar();
+    renderTimeSlots(state.selectedDate);
+    showModal();
+  }
+
+  function setSubmitting(isSubmitting) {
+    dom.submit.disabled = isSubmitting;
+    dom.submit.textContent = isSubmitting ? '預約送出中...' : '確認安排預約';
+    dom.submit.classList.toggle('opacity-60', isSubmitting);
+    dom.submit.classList.toggle('cursor-not-allowed', isSubmitting);
+  }
+
+  function getBookedCount(date, slot) {
+    return state.bookings.filter(booking => booking.date === date && booking.slot === slot).length;
+  }
+
+  function isDayFullyBooked(date) {
+    for (let hour = CONFIG.openHour; hour <= CONFIG.closeHour; hour += 1) {
+      if (getBookedCount(date, `${String(hour).padStart(2, '0')}:00`) < CONFIG.maxCapacity) return false;
+    }
+    return true;
+  }
+
+  function getHoliday(date) {
+    return state.holidays.find(holiday => holiday.date === date);
+  }
+
+  function showStatus(text, type) {
+    dom.status.textContent = text;
+    dom.status.className = type === 'error'
+      ? 'p-3 rounded-xl text-sm border bg-red-50 text-red-700 border-red-100'
+      : 'p-3 rounded-xl text-sm border bg-emerald-50 text-emerald-800 border-emerald-100';
+  }
+
+  function hideStatus() {
+    dom.status.className = 'hidden p-3 rounded-xl text-sm border';
+    dom.status.textContent = '';
+  }
+
+  function showModal() {
+    dom.modal.classList.remove('hidden');
+    setTimeout(() => {
+      dom.modal.classList.remove('opacity-0');
+      dom.modal.querySelector('div').classList.remove('scale-95');
+    }, 10);
+  }
+
+  function closeModal() {
+    dom.modal.classList.add('opacity-0');
+    dom.modal.querySelector('div').classList.add('scale-95');
+    setTimeout(() => dom.modal.classList.add('hidden'), 300);
+  }
+
+  function formatDate(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+
+  function startOfDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>跟著大米一起放鬆 | 後台管理</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Noto Sans TC',sans-serif;background-color:#faf9f6;color:#292524}</style>
+</head>
+<body class="min-h-screen pb-12">
+<section id="login-screen" class="min-h-screen flex items-center justify-center px-4">
+  <div class="bg-white w-full max-w-sm p-7 rounded-2xl border border-stone-100 shadow-sm">
+    <div class="mb-6">
+      <p class="text-xs text-emerald-700 font-medium font-mono mb-1">後台管理</p>
+      <h1 class="text-xl font-bold text-stone-800">跟著大米一起放鬆</h1>
+      <p class="text-sm text-stone-500 mt-2">請使用管理員 Email 與密碼登入後台。</p>
+    </div>
+    <form id="login-form" class="space-y-4">
+      <div>
+        <label for="admin-email" class="block text-sm font-medium text-stone-700 mb-1">管理員 Email</label>
+        <input id="admin-email" type="email" autocomplete="email" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm">
+      </div>
+      <div>
+        <label for="admin-password" class="block text-sm font-medium text-stone-700 mb-1">管理密碼</label>
+        <input id="admin-password" type="password" autocomplete="current-password" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm">
+      </div>
+      <p id="login-error" class="hidden text-sm text-red-600"></p>
+      <button class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-2.5 rounded-xl text-sm">登入後台</button>
+    </form>
+  </div>
+</section>
+
+<header id="admin-header" class="hidden bg-white/80 backdrop-blur-md border-b border-stone-100 sticky top-0 z-50 shadow-sm">
+  <div class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+    <div><span class="text-lg font-bold tracking-wider text-stone-800">跟著大米一起放鬆</span><span class="text-xs text-emerald-700 font-medium font-mono ml-2">後台管理</span></div>
+    <div class="flex items-center gap-2">
+      <a href="relax_client.html" class="px-3.5 py-1.5 rounded-full text-xs font-medium bg-emerald-700 text-white shadow-sm">查看前台</a>
+      <button id="logout-btn" type="button" class="px-3.5 py-1.5 rounded-full text-xs font-medium bg-stone-100 text-stone-600 hover:bg-stone-200 transition-all">登出</button>
+    </div>
+  </div>
+</header>
+
+<main id="admin-content" class="hidden max-w-5xl mx-auto px-4 mt-8 space-y-6">
+  <section class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm">
+    <h1 class="text-xl font-bold text-stone-800 mb-1">管理者後台</h1>
+    <p class="text-sm text-stone-500">管理預約名冊與休假日。休假日會同步讓前台日期不可點選。</p>
+  </section>
+
+  <div id="status-message" class="hidden p-3 rounded-xl text-sm border"></div>
+
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm">
+      <h2 class="font-bold text-stone-700 text-sm mb-4">新增休假日</h2>
+      <form id="holiday-form" class="space-y-3">
+        <div><label for="holiday-date" class="block text-sm font-medium text-stone-700 mb-1">休假日期 *</label><input id="holiday-date" type="date" required class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm"></div>
+        <div><label for="holiday-reason" class="block text-sm font-medium text-stone-700 mb-1">備註</label><input id="holiday-reason" maxlength="40" placeholder="例如：進修、私人行程、公休" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm"></div>
+        <button id="add-holiday-btn" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-2.5 rounded-xl text-sm">加入休假日</button>
+      </form>
+      <div class="mt-5">
+        <h3 class="text-xs font-bold text-stone-500 mb-2">休假日清單</h3>
+        <div id="holiday-list" class="space-y-2"></div>
+        <p id="holiday-empty" class="text-sm text-stone-400 py-6 text-center hidden">尚未設定休假日。</p>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm">
+      <h2 class="font-bold text-stone-700 text-sm mb-4">資料操作</h2>
+      <div class="space-y-3">
+        <button id="reload-btn" type="button" class="w-full px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-medium text-xs rounded-xl border border-emerald-100">重新讀取資料</button>
+        <button id="clear-bookings-btn" type="button" class="w-full px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-medium text-xs rounded-xl border border-red-100">清空所有預約資料</button>
+        <button id="clear-holidays-btn" type="button" class="w-full px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium text-xs rounded-xl border border-amber-100">清空所有休假日</button>
+      </div>
+      <p class="text-xs text-stone-400 mt-4">目前版本已連接 Supabase 資料庫，前台與後台可跨裝置同步。</p>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
+    <div class="p-5 border-b border-stone-100"><h2 class="font-bold text-stone-700 text-sm">目前預約名冊</h2></div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm border-collapse">
+        <thead><tr class="bg-stone-50/70 border-b border-stone-100 text-stone-500 font-medium text-xs uppercase tracking-wider"><th class="p-4">預約日期 / 時段</th><th class="p-4">姓名</th><th class="p-4">電話號碼</th><th class="p-4">LINE ID</th><th class="p-4 text-center">操作</th></tr></thead>
+        <tbody id="admin-table-body" class="divide-y divide-stone-100 text-stone-600"></tbody>
+      </table>
+    </div>
+    <div id="admin-empty" class="text-center py-12 text-stone-400 text-sm hidden">目前尚未有預約紀錄。</div>
+  </section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const SUPABASE_URL = 'https://nhynoxugvkkbovtnemww.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_hitSQ5O5nLVyk5_qN1GsXA_aJBEWaXH';
+  const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const $ = selector => document.querySelector(selector);
+  const el = (tag, className = '', text = '') => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text) node.textContent = text;
+    return node;
+  };
+
+  let bookings = [];
+  let holidays = [];
+  const dom = {
+    loginScreen: $('#login-screen'),
+    loginForm: $('#login-form'),
+    loginEmail: $('#admin-email'),
+    loginPassword: $('#admin-password'),
+    loginError: $('#login-error'),
+    adminHeader: $('#admin-header'),
+    adminContent: $('#admin-content'),
+    logout: $('#logout-btn'),
+    status: $('#status-message'),
+    tbody: $('#admin-table-body'),
+    empty: $('#admin-empty'),
+    hForm: $('#holiday-form'),
+    hDate: $('#holiday-date'),
+    hReason: $('#holiday-reason'),
+    hButton: $('#add-holiday-btn'),
+    hList: $('#holiday-list'),
+    hEmpty: $('#holiday-empty'),
+    reload: $('#reload-btn'),
+    clearB: $('#clear-bookings-btn'),
+    clearH: $('#clear-holidays-btn')
+  };
+
+  dom.loginForm.addEventListener('submit', login);
+  dom.logout.addEventListener('click', logout);
+  dom.hDate.min = formatDate(new Date());
+  dom.hForm.addEventListener('submit', addHoliday);
+  dom.reload.addEventListener('click', loadData);
+  dom.clearB.addEventListener('click', clearBookings);
+  dom.clearH.addEventListener('click', clearHolidays);
+
+  initAuth();
+
+  async function initAuth() {
+    const { data: { session } } = await db.auth.getSession();
+
+    if (session) {
+      showAdmin();
+      loadData();
+      return;
+    }
+
+    dom.loginScreen.classList.remove('hidden');
+    dom.adminHeader.classList.add('hidden');
+    dom.adminContent.classList.add('hidden');
+    setTimeout(() => dom.loginEmail.focus(), 50);
+  }
+
+  async function login(event) {
+    event.preventDefault();
+    const email = dom.loginEmail.value.trim();
+    const password = dom.loginPassword.value.trim();
+
+    if (!email || !password) {
+      dom.loginError.textContent = '請輸入 Email 和密碼。';
+      dom.loginError.classList.remove('hidden');
+      return;
+    }
+
+    const { error } = await db.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      dom.loginError.textContent = '登入失敗：Email 或密碼不正確。';
+      dom.loginError.classList.remove('hidden');
+      dom.loginPassword.select();
+      return;
+    }
+
+    dom.loginPassword.value = '';
+    dom.loginError.classList.add('hidden');
+    showAdmin();
+    loadData();
+  }
+
+  async function logout() {
+    await db.auth.signOut();
+    bookings = [];
+    holidays = [];
+    dom.tbody.replaceChildren();
+    dom.hList.replaceChildren();
+    dom.loginScreen.classList.remove('hidden');
+    dom.adminHeader.classList.add('hidden');
+    dom.adminContent.classList.add('hidden');
+    setTimeout(() => dom.loginEmail.focus(), 50);
+  }
+
+  function showAdmin() {
+    dom.loginScreen.classList.add('hidden');
+    dom.adminHeader.classList.remove('hidden');
+    dom.adminContent.classList.remove('hidden');
+  }
+
+  async function loadData() {
+    showStatus('資料載入中...', 'info');
+    const [{ data: bookingRows, error: bookingError }, { data: holidayRows, error: holidayError }] = await Promise.all([
+      db.from('bookings').select('id, booking_date, slot, name, phone, line_id').order('booking_date', { ascending: true }).order('slot', { ascending: true }),
+      db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true })
+    ]);
+
+    if (bookingError || holidayError) {
+      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message}`, 'error');
+      return;
+    }
+
+    bookings = (bookingRows || []).map(row => ({
+      id: row.id,
+      date: row.booking_date,
+      slot: row.slot,
+      name: row.name,
+      phone: row.phone,
+      lineId: row.line_id
+    }));
+    holidays = (holidayRows || []).map(row => ({
+      id: row.id,
+      date: row.holiday_date,
+      reason: row.reason || ''
+    }));
+
+    hideStatus();
+    renderAll();
+  }
+
+  function renderAll() {
+    renderBookings();
+    renderHolidays();
+  }
+
+  async function addHoliday(event) {
+    event.preventDefault();
+    const date = dom.hDate.value;
+    const reason = dom.hReason.value.trim();
+
+    if (!date) return alert('請選擇休假日期。');
+    if (holidays.some(holiday => holiday.date === date)) return alert('這天已經是休假日。');
+
+    setHolidayButton(true);
+    const { data, error } = await db
+      .from('holidays')
+      .insert({ holiday_date: date, reason })
+      .select('id, holiday_date, reason')
+      .single();
+    setHolidayButton(false);
+
+    if (error) {
+      alert('新增休假日失敗：' + error.message);
+      return;
+    }
+
+    holidays.push({ id: data.id, date: data.holiday_date, reason: data.reason || '' });
+    holidays.sort((a, b) => a.date.localeCompare(b.date));
+    dom.hForm.reset();
+    dom.hDate.min = formatDate(new Date());
+    renderHolidays();
+    showStatus('休假日已新增，前台會同步擋住該日期。', 'info');
+  }
+
+  function renderHolidays() {
+    dom.hList.replaceChildren();
+    dom.hEmpty.classList.toggle('hidden', holidays.length > 0);
+
+    holidays.forEach(holiday => {
+      const row = el('div', 'flex items-center justify-between gap-3 p-3 rounded-xl bg-stone-50 border border-stone-100');
+      const info = el('div');
+      info.append(el('div', 'text-sm font-semibold text-stone-700', holiday.date), el('div', 'text-xs text-stone-400', holiday.reason || '不開放預約'));
+      const btn = el('button', 'px-2.5 py-1 text-xs font-medium text-red-500 hover:text-white border border-red-200 hover:bg-red-500 rounded-lg transition-all', '移除');
+      btn.type = 'button';
+      btn.addEventListener('click', () => deleteHoliday(holiday.id));
+      row.append(info, btn);
+      dom.hList.appendChild(row);
+    });
+  }
+
+  function renderBookings() {
+    dom.tbody.replaceChildren();
+    dom.empty.classList.toggle('hidden', bookings.length > 0);
+    bookings.forEach(booking => dom.tbody.appendChild(row(booking)));
+  }
+
+  function row(booking) {
+    const tr = el('tr', 'hover:bg-stone-50/50 transition-colors');
+    const hour = parseInt(booking.slot.split(':')[0], 10);
+    const time = el('td', 'p-4 font-medium text-stone-800');
+    time.append(
+      el('div', 'text-xs text-stone-400 font-normal mb-0.5', '預約時間'),
+      document.createTextNode(`${booking.date} `),
+      el('span', 'text-xs text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded ml-1 font-medium', `${booking.slot}-${String(hour + 1).padStart(2, '0')}:00`)
+    );
+
+    const act = el('td', 'p-4 text-center');
+    const del = el('button', 'px-2.5 py-1 text-xs font-medium text-red-500 hover:text-white border border-red-200 hover:bg-red-500 rounded-lg transition-all', '取消預約');
+    del.type = 'button';
+    del.addEventListener('click', () => deleteBooking(booking.id));
+    act.appendChild(del);
+
+    tr.append(
+      time,
+      el('td', 'p-4 font-medium text-stone-700', booking.name),
+      el('td', 'p-4 font-mono text-stone-600', booking.phone),
+      el('td', 'p-4', booking.lineId),
+      act
+    );
+    return tr;
+  }
+
+  async function deleteBooking(id) {
+    if (!confirm('確定取消此筆預約？')) return;
+    const { error } = await db.from('bookings').delete().eq('id', id);
+    if (error) {
+      alert('取消預約失敗：' + error.message);
+      return;
+    }
+
+    bookings = bookings.filter(booking => booking.id !== id);
+    renderBookings();
+  }
+
+  async function deleteHoliday(id) {
+    if (!confirm('確定移除此休假日？前台會重新開放該日預約。')) return;
+    const { error } = await db.from('holidays').delete().eq('id', id);
+    if (error) {
+      alert('刪除休假日失敗：' + error.message);
+      return;
+    }
+
+    holidays = holidays.filter(holiday => holiday.id !== id);
+    renderHolidays();
+  }
+
+  async function clearBookings() {
+    if (!confirm('確定清空所有預約資料？')) return;
+    const { error } = await db.from('bookings').delete().not('id', 'is', null);
+    if (error) {
+      alert('清空預約失敗：' + error.message);
+      return;
+    }
+
+    bookings = [];
+    renderBookings();
+  }
+
+  async function clearHolidays() {
+    if (!confirm('確定清空所有休假日？')) return;
+    const { error } = await db.from('holidays').delete().not('id', 'is', null);
+    if (error) {
+      alert('清空休假日失敗：' + error.message);
+      return;
+    }
+
+    holidays = [];
+    renderHolidays();
+  }
+
+  function setHolidayButton(isSaving) {
+    dom.hButton.disabled = isSaving;
+    dom.hButton.textContent = isSaving ? '新增中...' : '加入休假日';
+    dom.hButton.classList.toggle('opacity-60', isSaving);
+    dom.hButton.classList.toggle('cursor-not-allowed', isSaving);
+  }
+
+  function showStatus(text, type) {
+    dom.status.textContent = text;
+    dom.status.className = type === 'error'
+      ? 'p-3 rounded-xl text-sm border bg-red-50 text-red-700 border-red-100'
+      : 'p-3 rounded-xl text-sm border bg-emerald-50 text-emerald-800 border-emerald-100';
+  }
+
+  function hideStatus() {
+    dom.status.className = 'hidden p-3 rounded-xl text-sm border';
+    dom.status.textContent = '';
+  }
+
+  function formatDate(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+})();
+</script>
+</body>
+</html>
