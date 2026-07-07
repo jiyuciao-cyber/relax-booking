@@ -146,19 +146,17 @@
     const [
       { data: bookingRows, error: bookingError },
       { data: holidayRows, error: holidayError },
-      { data: slotRows, error: slotError },
       { data: dailySettingRows, error: dailySettingError },
       { data: dailySlotRows, error: dailySlotError }
     ] = await Promise.all([
       loadPublicBookedSlots(),
       db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true }),
-      loadAvailableSlots(),
       loadDailySlotSettings(),
       loadDailyAvailableSlots()
     ]);
 
-    if (bookingError || holidayError || slotError || dailySettingError || dailySlotError) {
-      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message || slotError?.message || dailySettingError?.message || dailySlotError?.message}`, 'error');
+    if (bookingError || holidayError || dailySettingError || dailySlotError) {
+      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message || dailySettingError?.message || dailySlotError?.message}`, 'error');
       emptySlots('資料讀取失敗，請重新整理頁面');
       renderCalendar();
       return;
@@ -173,10 +171,7 @@
       date: row.holiday_date,
       reason: row.reason || ''
     }));
-    state.availableSlots = (slotRows || [])
-      .map(row => row.slot)
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
+    state.availableSlots = defaultSlots();
     state.dailySlotDates = new Set((dailySettingRows || []).map(row => row.slot_date));
     state.dailySlotsByDate = new Map();
     (dailySlotRows || []).forEach(row => {
@@ -201,20 +196,6 @@
     return db
       .from('bookings')
       .select('booking_date, slot');
-  }
-
-  async function loadAvailableSlots() {
-    const result = await db
-      .from('available_slots')
-      .select('slot')
-      .order('slot', { ascending: true });
-
-    if (!result.error) return result;
-
-    return {
-      data: defaultSlots().map(slot => ({ slot })),
-      error: null
-    };
   }
 
   async function loadDailySlotSettings() {
@@ -493,8 +474,9 @@
   }
 
   function nextHour(slot) {
-    const hour = parseInt(slot.split(':')[0], 10);
-    return `${String(hour + 1).padStart(2, '0')}:00`;
+    const [hourText, minuteText] = slot.split(':');
+    const date = new Date(2000, 0, 1, Number(hourText), Number(minuteText) + 60);
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
   }
 })();
 </script>
