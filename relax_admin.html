@@ -108,6 +108,29 @@
   </section>
 
   <section class="bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
+    <div class="p-5 border-b border-stone-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div>
+        <h2 class="font-bold text-stone-700 text-sm">預約行事曆</h2>
+        <p class="text-xs text-stone-400 mt-1">查看每天有哪些時段已有預約。</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="booking-cal-prev" type="button" class="w-8 h-8 rounded-full bg-stone-50 hover:bg-stone-100 text-stone-500">&lsaquo;</button>
+        <div id="booking-calendar-title" class="text-sm font-semibold text-stone-700 min-w-[110px] text-center"></div>
+        <button id="booking-cal-next" type="button" class="w-8 h-8 rounded-full bg-stone-50 hover:bg-stone-100 text-stone-500">&rsaquo;</button>
+        <button id="booking-cal-today" type="button" class="px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">本月</button>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <div class="min-w-[760px] p-4">
+        <div class="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-stone-400 mb-2">
+          <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+        </div>
+        <div id="booking-calendar-grid" class="grid grid-cols-7 gap-1"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
     <div class="p-5 border-b border-stone-100"><h2 class="font-bold text-stone-700 text-sm">目前預約名冊</h2></div>
     <div class="overflow-x-auto">
       <table class="w-full text-left text-sm border-collapse">
@@ -118,6 +141,19 @@
     <div id="admin-empty" class="text-center py-12 text-stone-400 text-sm hidden">目前尚未有預約紀錄。</div>
   </section>
 </main>
+
+<div id="booking-detail-modal" class="fixed inset-0 bg-stone-900/40 backdrop-blur-sm z-50 hidden items-center justify-center px-4">
+  <div class="bg-white w-full max-w-2xl rounded-2xl border border-stone-100 shadow-xl overflow-hidden">
+    <div class="p-5 border-b border-stone-100 flex items-start justify-between gap-4">
+      <div>
+        <h2 id="booking-detail-title" class="font-bold text-stone-800 text-base">預約詳情</h2>
+        <p id="booking-detail-subtitle" class="text-xs text-stone-400 mt-1"></p>
+      </div>
+      <button id="booking-detail-close" type="button" class="w-8 h-8 rounded-full bg-stone-50 hover:bg-stone-100 text-stone-500">×</button>
+    </div>
+    <div id="booking-detail-body" class="p-5 space-y-3 max-h-[70vh] overflow-y-auto"></div>
+  </div>
+</div>
 
 <script>
 (() => {
@@ -142,6 +178,11 @@
   let slotCapacityByDate = new Map();
   const DEFAULT_CAPACITY = 5;
   const allSlots = defaultSlots();
+  const calendarState = {
+    year: new Date().getFullYear(),
+    month: new Date().getMonth()
+  };
+  let activeBookingDetail = null;
   const dom = {
     loginScreen: $('#login-screen'),
     loginForm: $('#login-form'),
@@ -173,7 +214,17 @@
     reload: $('#reload-btn'),
     clearB: $('#clear-bookings-btn'),
     clearH: $('#clear-holidays-btn'),
-    clearS: $('#clear-slots-btn')
+    clearS: $('#clear-slots-btn'),
+    bookingCalPrev: $('#booking-cal-prev'),
+    bookingCalNext: $('#booking-cal-next'),
+    bookingCalToday: $('#booking-cal-today'),
+    bookingCalTitle: $('#booking-calendar-title'),
+    bookingCalGrid: $('#booking-calendar-grid'),
+    bookingDetailModal: $('#booking-detail-modal'),
+    bookingDetailTitle: $('#booking-detail-title'),
+    bookingDetailSubtitle: $('#booking-detail-subtitle'),
+    bookingDetailBody: $('#booking-detail-body'),
+    bookingDetailClose: $('#booking-detail-close')
   };
 
   dom.loginForm.addEventListener('submit', login);
@@ -193,6 +244,16 @@
   dom.clearB.addEventListener('click', clearBookings);
   dom.clearH.addEventListener('click', clearHolidays);
   dom.clearS.addEventListener('click', clearSlots);
+  dom.bookingCalPrev.addEventListener('click', () => changeBookingCalendarMonth(-1));
+  dom.bookingCalNext.addEventListener('click', () => changeBookingCalendarMonth(1));
+  dom.bookingCalToday.addEventListener('click', goCurrentBookingMonth);
+  dom.bookingDetailClose.addEventListener('click', closeBookingDetail);
+  dom.bookingDetailModal.addEventListener('click', event => {
+    if (event.target === dom.bookingDetailModal) closeBookingDetail();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && activeBookingDetail) closeBookingDetail();
+  });
   resetSlotInput();
 
   initAuth();
@@ -308,6 +369,7 @@
 
   function renderAll() {
     renderBookings();
+    renderBookingCalendar();
     renderHolidays();
     renderSlots();
     resetSlotInput();
@@ -452,6 +514,162 @@
     bookings.forEach(booking => dom.tbody.appendChild(row(booking)));
   }
 
+  function renderBookingCalendar() {
+    dom.bookingCalGrid.replaceChildren();
+    dom.bookingCalTitle.textContent = `${calendarState.year}年 ${calendarState.month + 1}月`;
+
+    const firstDay = new Date(calendarState.year, calendarState.month, 1).getDay();
+    const totalDays = new Date(calendarState.year, calendarState.month + 1, 0).getDate();
+    const todayStr = formatDate(new Date());
+    const bookingsByDate = groupBookingsByDate();
+    const frag = document.createDocumentFragment();
+
+    for (let index = 0; index < firstDay; index += 1) {
+      frag.appendChild(el('div', 'min-h-[116px] rounded-xl bg-stone-50/40 border border-stone-100/70'));
+    }
+
+    for (let day = 1; day <= totalDays; day += 1) {
+      const date = formatDate(new Date(calendarState.year, calendarState.month, day));
+      const dayBookings = bookingsByDate.get(date) || [];
+      const holiday = getHolidayByDate(date);
+      const cell = el('div', 'min-h-[116px] rounded-xl border p-2 text-left align-top transition-all hover:border-emerald-200 hover:bg-emerald-50/20 cursor-pointer');
+      cell.setAttribute('role', 'button');
+      cell.tabIndex = 0;
+      cell.className += date === todayStr ? ' border-emerald-300 bg-emerald-50/30' : ' border-stone-100 bg-white';
+      cell.addEventListener('click', () => selectSlotDateFromCalendar(date));
+      cell.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectSlotDateFromCalendar(date);
+        }
+      });
+
+      const top = el('div', 'flex items-center justify-between gap-2 mb-2');
+      top.appendChild(el('span', date === todayStr ? 'text-sm font-bold text-emerald-800' : 'text-sm font-bold text-stone-700', String(day)));
+
+      if (holiday) {
+        top.appendChild(el('span', 'text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100', '休假'));
+      } else if (dayBookings.length > 0) {
+        top.appendChild(el('span', 'text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100', `${dayBookings.length}筆`));
+      }
+
+      cell.appendChild(top);
+
+      if (dayBookings.length === 0) {
+        cell.appendChild(el('div', 'text-xs text-stone-300 pt-4 text-center', holiday ? '不開放' : '無預約'));
+      } else {
+        dayBookings.forEach(item => {
+          const line = el('button', 'w-full mb-1 rounded-lg bg-stone-50 border border-stone-100 px-2 py-1 text-left hover:bg-emerald-50 hover:border-emerald-200 transition-all');
+          line.type = 'button';
+          line.addEventListener('click', event => {
+            event.stopPropagation();
+            openBookingDetail(date, item.slot);
+          });
+          line.append(
+            el('div', 'text-xs font-semibold text-stone-700', `${item.slot} - ${nextHour(item.slot)}`),
+            el('div', 'text-[11px] text-stone-400', `${item.count} 人預約`)
+          );
+          cell.appendChild(line);
+        });
+      }
+
+      frag.appendChild(cell);
+    }
+
+    dom.bookingCalGrid.appendChild(frag);
+  }
+
+  function groupBookingsByDate() {
+    const grouped = new Map();
+
+    bookings.forEach(booking => {
+      if (!grouped.has(booking.date)) grouped.set(booking.date, new Map());
+      const dayMap = grouped.get(booking.date);
+      dayMap.set(booking.slot, (dayMap.get(booking.slot) || 0) + 1);
+    });
+
+    const result = new Map();
+    grouped.forEach((dayMap, date) => {
+      result.set(date, [...dayMap.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([slot, count]) => ({ slot, count })));
+    });
+
+    return result;
+  }
+
+  function changeBookingCalendarMonth(offset) {
+    const date = new Date(calendarState.year, calendarState.month + offset, 1);
+    calendarState.year = date.getFullYear();
+    calendarState.month = date.getMonth();
+    renderBookingCalendar();
+  }
+
+  function goCurrentBookingMonth() {
+    const now = new Date();
+    calendarState.year = now.getFullYear();
+    calendarState.month = now.getMonth();
+    renderBookingCalendar();
+  }
+
+  function selectSlotDateFromCalendar(date) {
+    dom.slotDate.value = date;
+    renderSlots();
+    resetSlotInput();
+    document.getElementById('slot-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function openBookingDetail(date, slot) {
+    activeBookingDetail = { date, slot };
+    renderBookingDetail();
+    dom.bookingDetailModal.classList.remove('hidden');
+    dom.bookingDetailModal.classList.add('flex');
+  }
+
+  function closeBookingDetail() {
+    activeBookingDetail = null;
+    dom.bookingDetailModal.classList.add('hidden');
+    dom.bookingDetailModal.classList.remove('flex');
+  }
+
+  function renderBookingDetail() {
+    if (!activeBookingDetail) return;
+
+    const { date, slot } = activeBookingDetail;
+    const detailBookings = bookings
+      .filter(booking => booking.date === date && booking.slot === slot)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    dom.bookingDetailTitle.textContent = `${date} ${slot} - ${nextHour(slot)}`;
+    dom.bookingDetailSubtitle.textContent = `${detailBookings.length} 人預約`;
+    dom.bookingDetailBody.replaceChildren();
+
+    if (detailBookings.length === 0) {
+      dom.bookingDetailBody.appendChild(el('p', 'text-sm text-stone-400 text-center py-8', '此時段目前沒有預約資料。'));
+      return;
+    }
+
+    detailBookings.forEach(booking => {
+      const card = el('div', 'rounded-xl border border-stone-100 bg-stone-50/60 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3');
+      const info = el('div', 'space-y-1');
+      info.append(
+        el('div', 'text-sm font-bold text-stone-800', booking.name),
+        el('div', 'text-sm text-stone-600', `電話：${booking.phone}`),
+        el('div', 'text-sm text-stone-600', `LINE / IG：${booking.lineId || '未填寫'}`)
+      );
+
+      const actions = el('div', 'flex items-center gap-2');
+      const call = el('a', 'px-2.5 py-1 text-xs font-medium text-emerald-700 hover:text-white border border-emerald-200 hover:bg-emerald-700 rounded-lg transition-all', '撥電話');
+      call.href = `tel:${booking.phone}`;
+      const del = el('button', 'px-2.5 py-1 text-xs font-medium text-red-500 hover:text-white border border-red-200 hover:bg-red-500 rounded-lg transition-all', '取消預約');
+      del.type = 'button';
+      del.addEventListener('click', () => deleteBooking(booking.id));
+      actions.append(call, del);
+      card.append(info, actions);
+      dom.bookingDetailBody.appendChild(card);
+    });
+  }
+
   function row(booking) {
     const tr = el('tr', 'hover:bg-stone-50/50 transition-colors');
     const time = el('td', 'p-4 font-medium text-stone-800');
@@ -487,6 +705,8 @@
 
     bookings = bookings.filter(booking => booking.id !== id);
     renderBookings();
+    renderBookingCalendar();
+    if (activeBookingDetail) renderBookingDetail();
   }
 
   async function deleteHoliday(id) {
@@ -751,6 +971,10 @@
   function getSlotCapacity(date, slot) {
     if (dailySlotDates.has(date)) return slotCapacityByDate.get(slotKey(date, slot)) ?? DEFAULT_CAPACITY;
     return DEFAULT_CAPACITY;
+  }
+
+  function getHolidayByDate(date) {
+    return holidays.find(holiday => holiday.date === date);
   }
 
   async function ensureDateSlotSetting(date) {
