@@ -73,8 +73,9 @@
           <input id="slot-date" type="date" required class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm">
         </div>
         <div>
-          <label for="slot-select" class="block text-sm font-medium text-stone-700 mb-1">新增開放時段</label>
-          <select id="slot-select" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm"></select>
+          <label for="slot-time" class="block text-sm font-medium text-stone-700 mb-1">手動輸入開放時間</label>
+          <input id="slot-time" type="time" step="900" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm">
+          <p class="text-xs text-stone-400 mt-1.5">可輸入 10:00、10:30、14:15 等時間。</p>
         </div>
         <button id="add-slot-btn" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-2.5 rounded-xl text-sm">加入當日可預約時段</button>
       </form>
@@ -154,7 +155,7 @@
     hEmpty: $('#holiday-empty'),
     slotForm: $('#slot-form'),
     slotDate: $('#slot-date'),
-    slotSelect: $('#slot-select'),
+    slotTime: $('#slot-time'),
     slotButton: $('#add-slot-btn'),
     slotTitle: $('#slot-list-title'),
     slotList: $('#slot-list'),
@@ -176,7 +177,7 @@
   dom.slotForm.addEventListener('submit', addSlot);
   dom.slotDate.addEventListener('change', () => {
     renderSlots();
-    renderSlotOptions();
+    resetSlotInput();
   });
   dom.useDefaultSlots.addEventListener('click', useDefaultSlotsForDate);
   dom.clearDateSlots.addEventListener('click', clearDateSlots);
@@ -184,7 +185,7 @@
   dom.clearB.addEventListener('click', clearBookings);
   dom.clearH.addEventListener('click', clearHolidays);
   dom.clearS.addEventListener('click', clearSlots);
-  renderSlotOptions();
+  resetSlotInput();
 
   initAuth();
 
@@ -298,7 +299,7 @@
     renderBookings();
     renderHolidays();
     renderSlots();
-    renderSlotOptions();
+    resetSlotInput();
   }
 
   async function addHoliday(event) {
@@ -333,10 +334,11 @@
   async function addSlot(event) {
     event.preventDefault();
     const date = dom.slotDate.value;
-    const slot = dom.slotSelect.value;
+    const slot = normalizeSlot(dom.slotTime.value);
 
     if (!date) return alert('請先選擇要調整的日期。');
-    if (!slot) return alert('請選擇要開放的時段。');
+    if (!slot) return alert('請輸入要開放的時間。');
+    if (!isValidSlot(slot)) return alert('時間格式不正確，請使用 HH:MM，例如 10:30。');
     if (getSlotsForSelectedDate().includes(slot)) return alert('這個時段已經開放了。');
 
     setSlotButton(true);
@@ -363,7 +365,7 @@
     dailySlotDates.add(date);
     dailySlotsByDate.set(date, slots);
     renderSlots();
-    renderSlotOptions();
+    resetSlotInput();
     showStatus(`${date} 的可預約時段已更新，前台會同步顯示。`, 'info');
   }
 
@@ -405,27 +407,10 @@
     });
   }
 
-  function renderSlotOptions() {
-    dom.slotSelect.replaceChildren();
-    const currentSlots = getSlotsForSelectedDate();
-    const availableToAdd = allSlots.filter(slot => !currentSlots.includes(slot));
-
-    if (availableToAdd.length === 0) {
-      dom.slotSelect.appendChild(el('option', '', '所有時段都已開放'));
-      dom.slotSelect.disabled = true;
-      dom.slotButton.disabled = true;
-      dom.slotButton.classList.add('opacity-60', 'cursor-not-allowed');
-      return;
-    }
-
-    dom.slotSelect.disabled = false;
+  function resetSlotInput() {
+    dom.slotTime.value = '';
     dom.slotButton.disabled = false;
     dom.slotButton.classList.remove('opacity-60', 'cursor-not-allowed');
-    availableToAdd.forEach(slot => {
-      const option = el('option', '', `${slot} - ${nextHour(slot)}`);
-      option.value = slot;
-      dom.slotSelect.appendChild(option);
-    });
   }
 
   function renderBookings() {
@@ -517,7 +502,7 @@
       dailySlotDates.add(date);
       dailySlotsByDate.set(date, rows.map(row => row.slot));
       renderSlots();
-      renderSlotOptions();
+      resetSlotInput();
       return;
     }
 
@@ -529,7 +514,7 @@
 
     dailySlotsByDate.set(date, getSlotsForSelectedDate().filter(item => item !== slot));
     renderSlots();
-    renderSlotOptions();
+    resetSlotInput();
   }
 
   async function clearBookings() {
@@ -582,7 +567,7 @@
     dailySlotDates.add(date);
     dailySlotsByDate.set(date, [...allSlots]);
     renderSlots();
-    renderSlotOptions();
+    resetSlotInput();
     showStatus(`${date} 已套用預設可預約時段。`, 'info');
   }
 
@@ -606,7 +591,7 @@
     dailySlotDates.add(date);
     dailySlotsByDate.set(date, []);
     renderSlots();
-    renderSlotOptions();
+    resetSlotInput();
     showStatus(`${date} 的可預約時段已清空。`, 'info');
   }
 
@@ -627,7 +612,7 @@
     dailySlotDates = new Set();
     dailySlotsByDate = new Map();
     renderSlots();
-    renderSlotOptions();
+    resetSlotInput();
   }
 
   function setHolidayButton(isSaving) {
@@ -669,8 +654,9 @@
   }
 
   function nextHour(slot) {
-    const hour = parseInt(slot.split(':')[0], 10);
-    return `${String(hour + 1).padStart(2, '0')}:00`;
+    const [hourText, minuteText] = slot.split(':');
+    const date = new Date(2000, 0, 1, Number(hourText), Number(minuteText) + 60);
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
   }
 
   function getSlotsForSelectedDate() {
@@ -686,6 +672,17 @@
 
     if (!error) dailySlotDates.add(date);
     return error;
+  }
+
+  function normalizeSlot(value) {
+    if (!value) return '';
+    const parts = value.split(':');
+    if (parts.length < 2) return value;
+    return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+  }
+
+  function isValidSlot(slot) {
+    return /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(slot);
   }
 })();
 </script>
