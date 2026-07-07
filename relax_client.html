@@ -106,7 +106,8 @@
     selectedDate: '',
     selectedSlot: '',
     bookings: [],
-    holidays: []
+    holidays: [],
+    availableSlots: defaultSlots()
   };
   const dom = {
     grid: $('#calendar-grid'),
@@ -140,13 +141,14 @@
   async function loadData() {
     showStatus('資料載入中...', 'info');
 
-    const [{ data: bookingRows, error: bookingError }, { data: holidayRows, error: holidayError }] = await Promise.all([
+    const [{ data: bookingRows, error: bookingError }, { data: holidayRows, error: holidayError }, { data: slotRows, error: slotError }] = await Promise.all([
       loadPublicBookedSlots(),
-      db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true })
+      db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true }),
+      loadAvailableSlots()
     ]);
 
-    if (bookingError || holidayError) {
-      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message}`, 'error');
+    if (bookingError || holidayError || slotError) {
+      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message || slotError?.message}`, 'error');
       emptySlots('資料讀取失敗，請重新整理頁面');
       renderCalendar();
       return;
@@ -161,6 +163,10 @@
       date: row.holiday_date,
       reason: row.reason || ''
     }));
+    state.availableSlots = (slotRows || [])
+      .map(row => row.slot)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
 
     hideStatus();
     renderCalendar();
@@ -178,6 +184,20 @@
     return db
       .from('bookings')
       .select('booking_date, slot');
+  }
+
+  async function loadAvailableSlots() {
+    const result = await db
+      .from('available_slots')
+      .select('slot')
+      .order('slot', { ascending: true });
+
+    if (!result.error) return result;
+
+    return {
+      data: defaultSlots().map(slot => ({ slot })),
+      error: null
+    };
   }
 
   function changeMonth(offset) {
@@ -252,9 +272,14 @@
     }
 
     const frag = document.createDocumentFragment();
-    for (let hour = CONFIG.openHour; hour <= CONFIG.closeHour; hour += 1) {
-      frag.appendChild(slotButton(dateStr, hour));
+    if (state.availableSlots.length === 0) {
+      emptySlots('目前沒有開放可預約時段');
+      return;
     }
+
+    state.availableSlots.forEach(slot => {
+      frag.appendChild(slotButton(dateStr, slot));
+    });
     dom.slots.appendChild(frag);
   }
 
@@ -262,9 +287,8 @@
     dom.slots.replaceChildren(el('p', 'text-sm text-stone-400 text-center py-12', text));
   }
 
-  function slotButton(dateStr, hour) {
-    const slot = `${String(hour).padStart(2, '0')}:00`;
-    const next = `${String(hour + 1).padStart(2, '0')}:00`;
+  function slotButton(dateStr, slot) {
+    const next = nextHour(slot);
     const remain = CONFIG.maxCapacity - getBookedCount(dateStr, slot);
     const btn = el('button', cls.slotBase);
     const badge = el('span');
@@ -277,6 +301,7 @@
       badge.textContent = '已滿名額';
       return btn;
     }
+
 
     if (slot === state.selectedSlot) {
       btn.className += ` ${cls.slotSelected}`;
@@ -311,6 +336,7 @@
 
     if (!state.selectedDate || !state.selectedSlot) return alert('請重新選擇日期與時段。');
     if (getHoliday(state.selectedDate)) return alert('此日期為休假日，請改選其他日期。');
+    if (!state.availableSlots.includes(state.selectedSlot)) return alert('此時段目前沒有開放預約，請改選其他時段。');
     if (!data.name || !data.phone || !data.lineId) return alert('請完整填寫姓名、電話號碼與 LINE ID。');
     if (!/^0[0-9]{8,9}$/.test(data.phone)) {
       dom.phone.focus();
@@ -366,8 +392,10 @@
   }
 
   function isDayFullyBooked(date) {
-    for (let hour = CONFIG.openHour; hour <= CONFIG.closeHour; hour += 1) {
-      if (getBookedCount(date, `${String(hour).padStart(2, '0')}:00`) < CONFIG.maxCapacity) return false;
+    if (state.availableSlots.length === 0) return true;
+
+    for (const slot of state.availableSlots) {
+      if (getBookedCount(date, slot) < CONFIG.maxCapacity) return false;
     }
     return true;
   }
@@ -408,6 +436,19 @@
 
   function startOfDay(date) {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function defaultSlots() {
+    const slots = [];
+    for (let hour = CONFIG.openHour; hour <= CONFIG.closeHour; hour += 1) {
+      slots.push(`${String(hour).padStart(2, '0')}:00`);
+    }
+    return slots;
+  }
+
+  function nextHour(slot) {
+    const hour = parseInt(slot.split(':')[0], 10);
+    return `${String(hour + 1).padStart(2, '0')}:00`;
   }
 })();
 </script>
