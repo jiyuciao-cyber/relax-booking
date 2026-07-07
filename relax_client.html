@@ -24,7 +24,7 @@
   <section class="space-y-8">
     <div class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm bg-gradient-to-br from-white to-emerald-50/20">
       <h1 class="text-2xl font-bold text-stone-800 mb-2">預約您的療癒時光</h1>
-      <p class="text-sm text-stone-500">請選擇日期與時段。每個時段上限 6 位；休假日不開放預約。</p>
+      <p class="text-sm text-stone-500">請選擇日期與時段。每個時段上限 5 位；休假日不開放預約。</p>
     </div>
 
     <div id="status-message" class="hidden p-3 rounded-xl text-sm border"></div>
@@ -74,7 +74,7 @@
   const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const CONFIG = {
-    maxCapacity: 6,
+    maxCapacity: 5,
     openHour: 9,
     closeHour: 21,
     monthNames: ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月']
@@ -109,7 +109,8 @@
     holidays: [],
     availableSlots: defaultSlots(),
     dailySlotDates: new Set(),
-    dailySlotsByDate: new Map()
+    dailySlotsByDate: new Map(),
+    slotCapacityByDate: new Map()
   };
   const dom = {
     grid: $('#calendar-grid'),
@@ -174,9 +175,11 @@
     state.availableSlots = defaultSlots();
     state.dailySlotDates = new Set((dailySettingRows || []).map(row => row.slot_date));
     state.dailySlotsByDate = new Map();
+    state.slotCapacityByDate = new Map();
     (dailySlotRows || []).forEach(row => {
       if (!state.dailySlotsByDate.has(row.slot_date)) state.dailySlotsByDate.set(row.slot_date, []);
       state.dailySlotsByDate.get(row.slot_date).push(row.slot);
+      state.slotCapacityByDate.set(slotKey(row.slot_date, row.slot), Number(row.capacity_limit ?? CONFIG.maxCapacity));
     });
     state.dailySlotsByDate.forEach(slots => slots.sort((a, b) => a.localeCompare(b)));
 
@@ -211,7 +214,7 @@
   async function loadDailyAvailableSlots() {
     const result = await db
       .from('daily_available_slots')
-      .select('slot_date, slot')
+      .select('slot_date, slot, capacity_limit')
       .order('slot_date', { ascending: true })
       .order('slot', { ascending: true });
 
@@ -310,7 +313,8 @@
 
   function slotButton(dateStr, slot) {
     const next = nextHour(slot);
-    const remain = CONFIG.maxCapacity - getBookedCount(dateStr, slot);
+    const limit = getSlotLimit(dateStr, slot);
+    const remain = limit - getBookedCount(dateStr, slot);
     const btn = el('button', cls.slotBase);
     const badge = el('span');
     btn.type = 'button';
@@ -365,7 +369,7 @@
     }
 
     await loadData();
-    if (getBookedCount(state.selectedDate, state.selectedSlot) >= CONFIG.maxCapacity) {
+    if (getBookedCount(state.selectedDate, state.selectedSlot) >= getSlotLimit(state.selectedDate, state.selectedSlot)) {
       dom.formBox.classList.add('hidden');
       renderTimeSlots(state.selectedDate);
       return alert('此時段已額滿，請改選其他時段。');
@@ -417,7 +421,7 @@
     if (slots.length === 0) return true;
 
     for (const slot of slots) {
-      if (getBookedCount(date, slot) < CONFIG.maxCapacity) return false;
+      if (getBookedCount(date, slot) < getSlotLimit(date, slot)) return false;
     }
     return true;
   }
@@ -425,6 +429,11 @@
   function getSlotsForDate(date) {
     if (state.dailySlotDates.has(date)) return state.dailySlotsByDate.get(date) || [];
     return state.availableSlots;
+  }
+
+  function getSlotLimit(date, slot) {
+    if (state.dailySlotDates.has(date)) return state.slotCapacityByDate.get(slotKey(date, slot)) ?? CONFIG.maxCapacity;
+    return CONFIG.maxCapacity;
   }
 
   function getHoliday(date) {
@@ -477,6 +486,10 @@
     const [hourText, minuteText] = slot.split(':');
     const date = new Date(2000, 0, 1, Number(hourText), Number(minuteText) + 60);
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  }
+
+  function slotKey(date, slot) {
+    return `${date}|${slot}`;
   }
 })();
 </script>
