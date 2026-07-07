@@ -77,6 +77,11 @@
           <input id="slot-time" type="time" step="900" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm">
           <p class="text-xs text-stone-400 mt-1.5">可輸入 10:00、10:30、14:15 等時間。</p>
         </div>
+        <div>
+          <label for="slot-capacity" class="block text-sm font-medium text-stone-700 mb-1">人數上限</label>
+          <input id="slot-capacity" type="number" min="0" max="999" value="5" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm">
+          <p class="text-xs text-stone-400 mt-1.5">例如上限 5 人；若想先關單，可在下方按「設為額滿」。</p>
+        </div>
         <button id="add-slot-btn" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-2.5 rounded-xl text-sm">加入當日可預約時段</button>
       </form>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
@@ -134,6 +139,8 @@
   let holidays = [];
   let dailySlotDates = new Set();
   let dailySlotsByDate = new Map();
+  let slotCapacityByDate = new Map();
+  const DEFAULT_CAPACITY = 5;
   const allSlots = defaultSlots();
   const dom = {
     loginScreen: $('#login-screen'),
@@ -156,6 +163,7 @@
     slotForm: $('#slot-form'),
     slotDate: $('#slot-date'),
     slotTime: $('#slot-time'),
+    slotCapacity: $('#slot-capacity'),
     slotButton: $('#add-slot-btn'),
     slotTitle: $('#slot-list-title'),
     slotList: $('#slot-list'),
@@ -236,6 +244,7 @@
     holidays = [];
     dailySlotDates = new Set();
     dailySlotsByDate = new Map();
+    slotCapacityByDate = new Map();
     dom.tbody.replaceChildren();
     dom.hList.replaceChildren();
     dom.slotList.replaceChildren();
@@ -262,7 +271,7 @@
       db.from('bookings').select('id, booking_date, slot, name, phone, line_id').order('booking_date', { ascending: true }).order('slot', { ascending: true }),
       db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true }),
       db.from('date_slot_settings').select('slot_date').order('slot_date', { ascending: true }),
-      db.from('daily_available_slots').select('slot_date, slot').order('slot_date', { ascending: true }).order('slot', { ascending: true })
+      db.from('daily_available_slots').select('slot_date, slot, capacity_limit').order('slot_date', { ascending: true }).order('slot', { ascending: true })
     ]);
 
     if (bookingError || holidayError || dailySettingError || dailySlotError) {
@@ -285,9 +294,11 @@
     }));
     dailySlotDates = new Set((dailySettingRows || []).map(row => row.slot_date));
     dailySlotsByDate = new Map();
+    slotCapacityByDate = new Map();
     (dailySlotRows || []).forEach(row => {
       if (!dailySlotsByDate.has(row.slot_date)) dailySlotsByDate.set(row.slot_date, []);
       dailySlotsByDate.get(row.slot_date).push(row.slot);
+      slotCapacityByDate.set(slotKey(row.slot_date, row.slot), Number(row.capacity_limit ?? DEFAULT_CAPACITY));
     });
     dailySlotsByDate.forEach(slots => slots.sort((a, b) => a.localeCompare(b)));
 
@@ -335,14 +346,16 @@
     event.preventDefault();
     const date = dom.slotDate.value;
     const slot = normalizeSlot(dom.slotTime.value);
+    const capacity = parseCapacity(dom.slotCapacity.value);
 
     if (!date) return alert('請先選擇要調整的日期。');
     if (!slot) return alert('請輸入要開放的時間。');
     if (!isValidSlot(slot)) return alert('時間格式不正確，請使用 HH:MM，例如 10:30。');
+    if (capacity === null) return alert('請輸入正確的人數上限，至少 0 人。');
     if (getSlotsForSelectedDate().includes(slot)) return alert('這個時段已經開放了。');
 
     setSlotButton(true);
-    const settingError = await ensureDateSlotSetting(date);
+    const settingError = await ensureCustomSlotsForDate(date);
     if (settingError) {
       setSlotButton(false);
       alert('建立日期設定失敗：' + settingError.message);
@@ -351,7 +364,7 @@
 
     const { error } = await db
       .from('daily_available_slots')
-      .insert({ slot_date: date, slot });
+      .insert({ slot_date: date, slot, capacity_limit: capacity });
     setSlotButton(false);
 
     if (error) {
@@ -364,6 +377,7 @@
     slots.sort((a, b) => a.localeCompare(b));
     dailySlotDates.add(date);
     dailySlotsByDate.set(date, slots);
+    slotCapacityByDate.set(slotKey(date, slot), capacity);
     renderSlots();
     resetSlotInput();
     showStatus(`${date} 的可預約時段已更新，前台會同步顯示。`, 'info');
@@ -396,19 +410,38 @@
     dom.slotEmpty.classList.toggle('hidden', slots.length > 0);
 
     slots.forEach(slot => {
-      const row = el('div', 'flex items-center justify-between gap-3 p-3 rounded-xl bg-stone-50 border border-stone-100');
+      const row = el('div', 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-xl bg-stone-50 border border-stone-100');
       const info = el('div');
-      info.append(el('div', 'text-sm font-semibold text-stone-700', `${slot} - ${nextHour(slot)}`), el('div', 'text-xs text-stone-400', `${date} 前台會顯示此時段`));
+      const bookedCount = getBookedCount(date, slot);
+      const capacity = getSlotCapacity(date, slot);
+      info.append(
+        el('div', 'text-sm font-semibold text-stone-700', `${slot} - ${nextHour(slot)}`),
+        el('div', 'text-xs text-stone-400', `${date} 已約 ${bookedCount} / 上限 ${capacity} 人`)
+      );
+      const controls = el('div', 'flex flex-wrap items-center gap-2');
+      const capacityInput = el('input', 'w-20 px-2 py-1 text-xs border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600');
+      capacityInput.type = 'number';
+      capacityInput.min = '0';
+      capacityInput.max = '999';
+      capacityInput.value = String(capacity);
+      const updateBtn = el('button', 'px-2.5 py-1 text-xs font-medium text-emerald-700 hover:text-white border border-emerald-200 hover:bg-emerald-700 rounded-lg transition-all', '更新上限');
+      updateBtn.type = 'button';
+      updateBtn.addEventListener('click', () => updateSlotCapacity(slot, capacityInput.value));
+      const closeBtn = el('button', 'px-2.5 py-1 text-xs font-medium text-amber-700 hover:text-white border border-amber-200 hover:bg-amber-600 rounded-lg transition-all', '設為額滿');
+      closeBtn.type = 'button';
+      closeBtn.addEventListener('click', () => closeSlotEarly(slot));
       const btn = el('button', 'px-2.5 py-1 text-xs font-medium text-red-500 hover:text-white border border-red-200 hover:bg-red-500 rounded-lg transition-all', '移除');
       btn.type = 'button';
       btn.addEventListener('click', () => deleteSlot(slot));
-      row.append(info, btn);
+      controls.append(capacityInput, updateBtn, closeBtn, btn);
+      row.append(info, controls);
       dom.slotList.appendChild(row);
     });
   }
 
   function resetSlotInput() {
     dom.slotTime.value = '';
+    dom.slotCapacity.value = String(DEFAULT_CAPACITY);
     dom.slotButton.disabled = false;
     dom.slotButton.classList.remove('opacity-60', 'cursor-not-allowed');
   }
@@ -421,12 +454,11 @@
 
   function row(booking) {
     const tr = el('tr', 'hover:bg-stone-50/50 transition-colors');
-    const hour = parseInt(booking.slot.split(':')[0], 10);
     const time = el('td', 'p-4 font-medium text-stone-800');
     time.append(
       el('div', 'text-xs text-stone-400 font-normal mb-0.5', '預約時間'),
       document.createTextNode(`${booking.date} `),
-      el('span', 'text-xs text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded ml-1 font-medium', `${booking.slot}-${String(hour + 1).padStart(2, '0')}:00`)
+      el('span', 'text-xs text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded ml-1 font-medium', `${booking.slot}-${nextHour(booking.slot)}`)
     );
 
     const act = el('td', 'p-4 text-center');
@@ -489,7 +521,7 @@
 
       const rows = allSlots
         .filter(item => item !== slot)
-        .map(item => ({ slot_date: date, slot: item }));
+        .map(item => ({ slot_date: date, slot: item, capacity_limit: DEFAULT_CAPACITY }));
       const { error } = rows.length > 0
         ? await db.from('daily_available_slots').insert(rows)
         : { error: null };
@@ -501,6 +533,7 @@
 
       dailySlotDates.add(date);
       dailySlotsByDate.set(date, rows.map(row => row.slot));
+      rows.forEach(row => slotCapacityByDate.set(slotKey(date, row.slot), row.capacity_limit));
       renderSlots();
       resetSlotInput();
       return;
@@ -513,8 +546,48 @@
     }
 
     dailySlotsByDate.set(date, getSlotsForSelectedDate().filter(item => item !== slot));
+    slotCapacityByDate.delete(slotKey(date, slot));
     renderSlots();
     resetSlotInput();
+  }
+
+  async function updateSlotCapacity(slot, value) {
+    const date = dom.slotDate.value;
+    const capacity = parseCapacity(value);
+
+    if (!date) return alert('請先選擇要調整的日期。');
+    if (capacity === null) return alert('請輸入正確的人數上限，至少 0 人。');
+
+    const setupError = await ensureCustomSlotsForDate(date);
+    if (setupError) {
+      alert('建立日期設定失敗：' + setupError.message);
+      return;
+    }
+
+    const { error } = await db
+      .from('daily_available_slots')
+      .update({ capacity_limit: capacity })
+      .eq('slot_date', date)
+      .eq('slot', slot);
+
+    if (error) {
+      alert('更新人數上限失敗：' + error.message);
+      return;
+    }
+
+    slotCapacityByDate.set(slotKey(date, slot), capacity);
+    renderSlots();
+    showStatus(`${date} ${slot} 人數上限已更新為 ${capacity} 人。`, 'info');
+  }
+
+  async function closeSlotEarly(slot) {
+    const date = dom.slotDate.value;
+    if (!date) return alert('請先選擇要調整的日期。');
+
+    const bookedCount = getBookedCount(date, slot);
+    if (!confirm(`確定將 ${date} ${slot} 設為額滿？目前已約 ${bookedCount} 人，上限會改成 ${bookedCount} 人。`)) return;
+
+    await updateSlotCapacity(slot, String(bookedCount));
   }
 
   async function clearBookings() {
@@ -546,6 +619,7 @@
     if (!date) return alert('請先選擇要調整的日期。');
     if (!confirm(`確定讓 ${date} 套用全部預設時段？`)) return;
 
+    const oldSlots = getSlotsForSelectedDate();
     const settingError = await ensureDateSlotSetting(date);
     if (settingError) {
       alert('建立日期設定失敗：' + settingError.message);
@@ -558,7 +632,7 @@
       return;
     }
 
-    const { error } = await db.from('daily_available_slots').insert(allSlots.map(slot => ({ slot_date: date, slot })));
+    const { error } = await db.from('daily_available_slots').insert(allSlots.map(slot => ({ slot_date: date, slot, capacity_limit: DEFAULT_CAPACITY })));
     if (error) {
       alert('更新當日時段失敗：' + error.message);
       return;
@@ -566,6 +640,8 @@
 
     dailySlotDates.add(date);
     dailySlotsByDate.set(date, [...allSlots]);
+    oldSlots.forEach(slot => slotCapacityByDate.delete(slotKey(date, slot)));
+    allSlots.forEach(slot => slotCapacityByDate.set(slotKey(date, slot), DEFAULT_CAPACITY));
     renderSlots();
     resetSlotInput();
     showStatus(`${date} 已套用預設可預約時段。`, 'info');
@@ -576,6 +652,7 @@
     if (!date) return alert('請先選擇要調整的日期。');
     if (!confirm(`確定清空 ${date} 的所有可預約時段？前台當天會沒有可選時段。`)) return;
 
+    const oldSlots = getSlotsForSelectedDate();
     const settingError = await ensureDateSlotSetting(date);
     if (settingError) {
       alert('建立日期設定失敗：' + settingError.message);
@@ -590,6 +667,7 @@
 
     dailySlotDates.add(date);
     dailySlotsByDate.set(date, []);
+    oldSlots.forEach(slot => slotCapacityByDate.delete(slotKey(date, slot)));
     renderSlots();
     resetSlotInput();
     showStatus(`${date} 的可預約時段已清空。`, 'info');
@@ -611,6 +689,7 @@
 
     dailySlotDates = new Set();
     dailySlotsByDate = new Map();
+    slotCapacityByDate = new Map();
     renderSlots();
     resetSlotInput();
   }
@@ -665,6 +744,15 @@
     return [...allSlots];
   }
 
+  function getBookedCount(date, slot) {
+    return bookings.filter(booking => booking.date === date && booking.slot === slot).length;
+  }
+
+  function getSlotCapacity(date, slot) {
+    if (dailySlotDates.has(date)) return slotCapacityByDate.get(slotKey(date, slot)) ?? DEFAULT_CAPACITY;
+    return DEFAULT_CAPACITY;
+  }
+
   async function ensureDateSlotSetting(date) {
     const { error } = await db
       .from('date_slot_settings')
@@ -672,6 +760,20 @@
 
     if (!error) dailySlotDates.add(date);
     return error;
+  }
+
+  async function ensureCustomSlotsForDate(date) {
+    const settingError = await ensureDateSlotSetting(date);
+    if (settingError) return settingError;
+    if (dailySlotsByDate.has(date)) return null;
+
+    const rows = allSlots.map(slot => ({ slot_date: date, slot, capacity_limit: DEFAULT_CAPACITY }));
+    const { error } = await db.from('daily_available_slots').insert(rows);
+    if (error) return error;
+
+    dailySlotsByDate.set(date, [...allSlots]);
+    rows.forEach(row => slotCapacityByDate.set(slotKey(date, row.slot), row.capacity_limit));
+    return null;
   }
 
   function normalizeSlot(value) {
@@ -683,6 +785,16 @@
 
   function isValidSlot(slot) {
     return /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(slot);
+  }
+
+  function parseCapacity(value) {
+    const capacity = Number(value);
+    if (!Number.isInteger(capacity) || capacity < 0 || capacity > 999) return null;
+    return capacity;
+  }
+
+  function slotKey(date, slot) {
+    return `${date}|${slot}`;
   }
 })();
 </script>
