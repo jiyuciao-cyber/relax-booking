@@ -107,7 +107,9 @@
     selectedSlot: '',
     bookings: [],
     holidays: [],
-    availableSlots: defaultSlots()
+    availableSlots: defaultSlots(),
+    dailySlotDates: new Set(),
+    dailySlotsByDate: new Map()
   };
   const dom = {
     grid: $('#calendar-grid'),
@@ -141,14 +143,22 @@
   async function loadData() {
     showStatus('資料載入中...', 'info');
 
-    const [{ data: bookingRows, error: bookingError }, { data: holidayRows, error: holidayError }, { data: slotRows, error: slotError }] = await Promise.all([
+    const [
+      { data: bookingRows, error: bookingError },
+      { data: holidayRows, error: holidayError },
+      { data: slotRows, error: slotError },
+      { data: dailySettingRows, error: dailySettingError },
+      { data: dailySlotRows, error: dailySlotError }
+    ] = await Promise.all([
       loadPublicBookedSlots(),
       db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true }),
-      loadAvailableSlots()
+      loadAvailableSlots(),
+      loadDailySlotSettings(),
+      loadDailyAvailableSlots()
     ]);
 
-    if (bookingError || holidayError || slotError) {
-      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message || slotError?.message}`, 'error');
+    if (bookingError || holidayError || slotError || dailySettingError || dailySlotError) {
+      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message || slotError?.message || dailySettingError?.message || dailySlotError?.message}`, 'error');
       emptySlots('資料讀取失敗，請重新整理頁面');
       renderCalendar();
       return;
@@ -167,6 +177,13 @@
       .map(row => row.slot)
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
+    state.dailySlotDates = new Set((dailySettingRows || []).map(row => row.slot_date));
+    state.dailySlotsByDate = new Map();
+    (dailySlotRows || []).forEach(row => {
+      if (!state.dailySlotsByDate.has(row.slot_date)) state.dailySlotsByDate.set(row.slot_date, []);
+      state.dailySlotsByDate.get(row.slot_date).push(row.slot);
+    });
+    state.dailySlotsByDate.forEach(slots => slots.sort((a, b) => a.localeCompare(b)));
 
     hideStatus();
     renderCalendar();
@@ -198,6 +215,28 @@
       data: defaultSlots().map(slot => ({ slot })),
       error: null
     };
+  }
+
+  async function loadDailySlotSettings() {
+    const result = await db
+      .from('date_slot_settings')
+      .select('slot_date');
+
+    if (!result.error) return result;
+
+    return { data: [], error: null };
+  }
+
+  async function loadDailyAvailableSlots() {
+    const result = await db
+      .from('daily_available_slots')
+      .select('slot_date, slot')
+      .order('slot_date', { ascending: true })
+      .order('slot', { ascending: true });
+
+    if (!result.error) return result;
+
+    return { data: [], error: null };
   }
 
   function changeMonth(offset) {
@@ -271,13 +310,14 @@
       return;
     }
 
+    const slots = getSlotsForDate(dateStr);
     const frag = document.createDocumentFragment();
-    if (state.availableSlots.length === 0) {
+    if (slots.length === 0) {
       emptySlots('目前沒有開放可預約時段');
       return;
     }
 
-    state.availableSlots.forEach(slot => {
+    slots.forEach(slot => {
       frag.appendChild(slotButton(dateStr, slot));
     });
     dom.slots.appendChild(frag);
@@ -336,7 +376,7 @@
 
     if (!state.selectedDate || !state.selectedSlot) return alert('請重新選擇日期與時段。');
     if (getHoliday(state.selectedDate)) return alert('此日期為休假日，請改選其他日期。');
-    if (!state.availableSlots.includes(state.selectedSlot)) return alert('此時段目前沒有開放預約，請改選其他時段。');
+    if (!getSlotsForDate(state.selectedDate).includes(state.selectedSlot)) return alert('此時段目前沒有開放預約，請改選其他時段。');
     if (!data.name || !data.phone || !data.lineId) return alert('請完整填寫姓名、電話號碼與 LINE ID。');
     if (!/^0[0-9]{8,9}$/.test(data.phone)) {
       dom.phone.focus();
@@ -392,12 +432,18 @@
   }
 
   function isDayFullyBooked(date) {
-    if (state.availableSlots.length === 0) return true;
+    const slots = getSlotsForDate(date);
+    if (slots.length === 0) return true;
 
-    for (const slot of state.availableSlots) {
+    for (const slot of slots) {
       if (getBookedCount(date, slot) < CONFIG.maxCapacity) return false;
     }
     return true;
+  }
+
+  function getSlotsForDate(date) {
+    if (state.dailySlotDates.has(date)) return state.dailySlotsByDate.get(date) || [];
+    return state.availableSlots;
   }
 
   function getHoliday(date) {
