@@ -50,7 +50,7 @@
 
   <div id="status-message" class="hidden p-3 rounded-xl text-sm border"></div>
 
-  <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm">
       <h2 class="font-bold text-stone-700 text-sm mb-4">新增休假日</h2>
       <form id="holiday-form" class="space-y-3">
@@ -66,11 +66,28 @@
     </div>
 
     <div class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm">
+      <h2 class="font-bold text-stone-700 text-sm mb-4">可預約時段設定</h2>
+      <form id="slot-form" class="space-y-3">
+        <div>
+          <label for="slot-select" class="block text-sm font-medium text-stone-700 mb-1">新增開放時段</label>
+          <select id="slot-select" class="w-full px-4 py-2 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600 text-sm"></select>
+        </div>
+        <button id="add-slot-btn" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-2.5 rounded-xl text-sm">加入可預約時段</button>
+      </form>
+      <div class="mt-5">
+        <h3 class="text-xs font-bold text-stone-500 mb-2">目前開放時段</h3>
+        <div id="slot-list" class="space-y-2"></div>
+        <p id="slot-empty" class="text-sm text-stone-400 py-6 text-center hidden">目前沒有開放任何時段。</p>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm">
       <h2 class="font-bold text-stone-700 text-sm mb-4">資料操作</h2>
       <div class="space-y-3">
         <button id="reload-btn" type="button" class="w-full px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-medium text-xs rounded-xl border border-emerald-100">重新讀取資料</button>
         <button id="clear-bookings-btn" type="button" class="w-full px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-medium text-xs rounded-xl border border-red-100">清空所有預約資料</button>
         <button id="clear-holidays-btn" type="button" class="w-full px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium text-xs rounded-xl border border-amber-100">清空所有休假日</button>
+        <button id="clear-slots-btn" type="button" class="w-full px-4 py-2 bg-stone-50 hover:bg-stone-100 text-stone-600 font-medium text-xs rounded-xl border border-stone-100">清空所有可預約時段</button>
       </div>
       <p class="text-xs text-stone-400 mt-4">目前版本已連接 Supabase 資料庫，前台與後台可跨裝置同步。</p>
     </div>
@@ -106,6 +123,8 @@
 
   let bookings = [];
   let holidays = [];
+  let availableSlots = [];
+  const allSlots = defaultSlots();
   const dom = {
     loginScreen: $('#login-screen'),
     loginForm: $('#login-form'),
@@ -124,18 +143,27 @@
     hButton: $('#add-holiday-btn'),
     hList: $('#holiday-list'),
     hEmpty: $('#holiday-empty'),
+    slotForm: $('#slot-form'),
+    slotSelect: $('#slot-select'),
+    slotButton: $('#add-slot-btn'),
+    slotList: $('#slot-list'),
+    slotEmpty: $('#slot-empty'),
     reload: $('#reload-btn'),
     clearB: $('#clear-bookings-btn'),
-    clearH: $('#clear-holidays-btn')
+    clearH: $('#clear-holidays-btn'),
+    clearS: $('#clear-slots-btn')
   };
 
   dom.loginForm.addEventListener('submit', login);
   dom.logout.addEventListener('click', logout);
   dom.hDate.min = formatDate(new Date());
   dom.hForm.addEventListener('submit', addHoliday);
+  dom.slotForm.addEventListener('submit', addSlot);
   dom.reload.addEventListener('click', loadData);
   dom.clearB.addEventListener('click', clearBookings);
   dom.clearH.addEventListener('click', clearHolidays);
+  dom.clearS.addEventListener('click', clearSlots);
+  renderSlotOptions();
 
   initAuth();
 
@@ -184,8 +212,10 @@
     await db.auth.signOut();
     bookings = [];
     holidays = [];
+    availableSlots = [];
     dom.tbody.replaceChildren();
     dom.hList.replaceChildren();
+    dom.slotList.replaceChildren();
     dom.loginScreen.classList.remove('hidden');
     dom.adminHeader.classList.add('hidden');
     dom.adminContent.classList.add('hidden');
@@ -200,13 +230,14 @@
 
   async function loadData() {
     showStatus('資料載入中...', 'info');
-    const [{ data: bookingRows, error: bookingError }, { data: holidayRows, error: holidayError }] = await Promise.all([
+    const [{ data: bookingRows, error: bookingError }, { data: holidayRows, error: holidayError }, { data: slotRows, error: slotError }] = await Promise.all([
       db.from('bookings').select('id, booking_date, slot, name, phone, line_id').order('booking_date', { ascending: true }).order('slot', { ascending: true }),
-      db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true })
+      db.from('holidays').select('id, holiday_date, reason').order('holiday_date', { ascending: true }),
+      db.from('available_slots').select('slot').order('slot', { ascending: true })
     ]);
 
-    if (bookingError || holidayError) {
-      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message}`, 'error');
+    if (bookingError || holidayError || slotError) {
+      showStatus(`讀取資料失敗：${bookingError?.message || holidayError?.message || slotError?.message}`, 'error');
       return;
     }
 
@@ -223,6 +254,7 @@
       date: row.holiday_date,
       reason: row.reason || ''
     }));
+    availableSlots = (slotRows || []).map(row => row.slot).filter(Boolean).sort((a, b) => a.localeCompare(b));
 
     hideStatus();
     renderAll();
@@ -231,6 +263,8 @@
   function renderAll() {
     renderBookings();
     renderHolidays();
+    renderSlots();
+    renderSlotOptions();
   }
 
   async function addHoliday(event) {
@@ -262,6 +296,31 @@
     showStatus('休假日已新增，前台會同步擋住該日期。', 'info');
   }
 
+  async function addSlot(event) {
+    event.preventDefault();
+    const slot = dom.slotSelect.value;
+
+    if (!slot) return alert('請選擇要開放的時段。');
+    if (availableSlots.includes(slot)) return alert('這個時段已經開放了。');
+
+    setSlotButton(true);
+    const { error } = await db
+      .from('available_slots')
+      .insert({ slot });
+    setSlotButton(false);
+
+    if (error) {
+      alert('新增可預約時段失敗：' + error.message);
+      return;
+    }
+
+    availableSlots.push(slot);
+    availableSlots.sort((a, b) => a.localeCompare(b));
+    renderSlots();
+    renderSlotOptions();
+    showStatus('可預約時段已更新，前台會同步顯示。', 'info');
+  }
+
   function renderHolidays() {
     dom.hList.replaceChildren();
     dom.hEmpty.classList.toggle('hidden', holidays.length > 0);
@@ -275,6 +334,44 @@
       btn.addEventListener('click', () => deleteHoliday(holiday.id));
       row.append(info, btn);
       dom.hList.appendChild(row);
+    });
+  }
+
+  function renderSlots() {
+    dom.slotList.replaceChildren();
+    dom.slotEmpty.classList.toggle('hidden', availableSlots.length > 0);
+
+    availableSlots.forEach(slot => {
+      const row = el('div', 'flex items-center justify-between gap-3 p-3 rounded-xl bg-stone-50 border border-stone-100');
+      const info = el('div');
+      info.append(el('div', 'text-sm font-semibold text-stone-700', `${slot} - ${nextHour(slot)}`), el('div', 'text-xs text-stone-400', '前台會顯示此時段'));
+      const btn = el('button', 'px-2.5 py-1 text-xs font-medium text-red-500 hover:text-white border border-red-200 hover:bg-red-500 rounded-lg transition-all', '移除');
+      btn.type = 'button';
+      btn.addEventListener('click', () => deleteSlot(slot));
+      row.append(info, btn);
+      dom.slotList.appendChild(row);
+    });
+  }
+
+  function renderSlotOptions() {
+    dom.slotSelect.replaceChildren();
+    const availableToAdd = allSlots.filter(slot => !availableSlots.includes(slot));
+
+    if (availableToAdd.length === 0) {
+      dom.slotSelect.appendChild(el('option', '', '所有時段都已開放'));
+      dom.slotSelect.disabled = true;
+      dom.slotButton.disabled = true;
+      dom.slotButton.classList.add('opacity-60', 'cursor-not-allowed');
+      return;
+    }
+
+    dom.slotSelect.disabled = false;
+    dom.slotButton.disabled = false;
+    dom.slotButton.classList.remove('opacity-60', 'cursor-not-allowed');
+    availableToAdd.forEach(slot => {
+      const option = el('option', '', `${slot} - ${nextHour(slot)}`);
+      option.value = slot;
+      dom.slotSelect.appendChild(option);
     });
   }
 
@@ -334,6 +431,24 @@
     renderHolidays();
   }
 
+  async function deleteSlot(slot) {
+    const hasBookings = bookings.some(booking => booking.slot === slot);
+    const message = hasBookings
+      ? '這個時段已有預約紀錄。移除後，前台之後不再開放此時段，但既有預約仍會留在後台。確定移除？'
+      : '確定移除此可預約時段？';
+
+    if (!confirm(message)) return;
+    const { error } = await db.from('available_slots').delete().eq('slot', slot);
+    if (error) {
+      alert('移除可預約時段失敗：' + error.message);
+      return;
+    }
+
+    availableSlots = availableSlots.filter(item => item !== slot);
+    renderSlots();
+    renderSlotOptions();
+  }
+
   async function clearBookings() {
     if (!confirm('確定清空所有預約資料？')) return;
     const { error } = await db.from('bookings').delete().not('id', 'is', null);
@@ -358,11 +473,31 @@
     renderHolidays();
   }
 
+  async function clearSlots() {
+    if (!confirm('確定清空所有可預約時段？前台會暫時沒有可選時段。')) return;
+    const { error } = await db.from('available_slots').delete().not('slot', 'is', null);
+    if (error) {
+      alert('清空可預約時段失敗：' + error.message);
+      return;
+    }
+
+    availableSlots = [];
+    renderSlots();
+    renderSlotOptions();
+  }
+
   function setHolidayButton(isSaving) {
     dom.hButton.disabled = isSaving;
     dom.hButton.textContent = isSaving ? '新增中...' : '加入休假日';
     dom.hButton.classList.toggle('opacity-60', isSaving);
     dom.hButton.classList.toggle('cursor-not-allowed', isSaving);
+  }
+
+  function setSlotButton(isSaving) {
+    dom.slotButton.disabled = isSaving;
+    dom.slotButton.textContent = isSaving ? '新增中...' : '加入可預約時段';
+    dom.slotButton.classList.toggle('opacity-60', isSaving);
+    dom.slotButton.classList.toggle('cursor-not-allowed', isSaving);
   }
 
   function showStatus(text, type) {
@@ -379,6 +514,19 @@
 
   function formatDate(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+
+  function defaultSlots() {
+    const slots = [];
+    for (let hour = 9; hour <= 21; hour += 1) {
+      slots.push(`${String(hour).padStart(2, '0')}:00`);
+    }
+    return slots;
+  }
+
+  function nextHour(slot) {
+    const hour = parseInt(slot.split(':')[0], 10);
+    return `${String(hour + 1).padStart(2, '0')}:00`;
   }
 })();
 </script>
